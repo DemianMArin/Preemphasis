@@ -1,6 +1,8 @@
 import wave
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import os
 
 
 def display_graphs(x_space: np.ndarray, y_space1: np.ndarray, y_space2: np.ndarray, y_space3: np.ndarray, y_space4: np.ndarray, idx: list):
@@ -67,8 +69,8 @@ def open_file(file_with_signal: str, print_path=False):
     if (print_path):
         print(f"F() -> open_file")
         print(f"Path: {file_with_signal}")
-        print(f"Type frames: {type(frames)}")
-        print(f"Metadata: {metadata} \n")
+        # print(f"Type frames: {type(frames)}")
+        print(f"Metadata: {metadata} ")
 
     signal_data = {
         "metadata" : metadata,
@@ -150,7 +152,7 @@ def hamming_window(signal: np.ndarray, nframes: int):
 # x         => 20ms
 # x -> samples per frame
 # Outuput: sliced array 
-def slice_signal(signal: np.ndarray, framerate: int, nframes: int, path2save: str):
+def slice_signal(signal: np.ndarray, framerate: int, nframes: int):
     samples_per_20ms = int(0.02 * framerate)
     samples_per_10ms = int(0.01 * framerate)
     num_frames_in_signal = int((nframes-samples_per_20ms)/samples_per_10ms) + 1
@@ -206,7 +208,11 @@ def slice_signal(signal: np.ndarray, framerate: int, nframes: int, path2save: st
 
     trimmed_signal = signal[start_index_trimmed_sampled:finish_index_trimmed_sampled]
     
-    np.save(path2save+".npy", trimmed_signal)
+    # with wave.open("output.wav", mode="wb") as wav_file:
+    #     wav_file.setnchannels(nchannels)
+    #     wav_file.setsampwidth(sampwidth)
+    #     wav_file.setframerate(framerate)
+    #     wav_file.writeframes(trimmed_signal.tobytes())
 
     output = {
         "trimmed_signal" : trimmed_signal,
@@ -215,9 +221,8 @@ def slice_signal(signal: np.ndarray, framerate: int, nframes: int, path2save: st
       }
     return output
 
-def do_preemphasis(path: str, output_path: str):
-    file_path = path + name
-    signal_data = open_file(path, print_path=True)
+def do_preemphasis(path: str, output_path: str, display_graphs_allow=False, save_to_file=False):
+    signal_data = open_file(path, print_path=False)
     frames = signal_data["frames"]
     nchannels = signal_data["nchannels"]
     nframes = signal_data["nframes"]
@@ -233,31 +238,37 @@ def do_preemphasis(path: str, output_path: str):
     output = hamming_window(signal_filtered, nframes)
     signal_hamming = output["hamming_signal"]
 
-    output = slice_signal(signal_hamming, framerate, nframes, output_path)
+    output = slice_signal(signal_hamming, framerate, nframes)
     trimmed_signal = output["trimmed_signal"]
     start_idx = output["start_idx"]
     finish_idx = output["finish_idx"]
 
-    display_graphs(time, signal_raw, signal_filtered, signal_hamming, trimmed_signal, [start_idx, finish_idx])
+
+    if (display_graphs_allow == True):
+        print(f"Trimmed signal shape: {trimmed_signal.shape}")
+        display_graphs(time, signal_raw, signal_filtered, signal_hamming, trimmed_signal, [start_idx, finish_idx])
+
+    if (save_to_file == True):
+        np.save(output_path+".npy", trimmed_signal)
+
 
 if __name__ == "__main__":
     print(f"Starting preemphasis")
-    path = "Data/start/"
-    name = "start-01"
-    output_path = "Data/start_o/"
-    do_preemphasis(path+name, output_path+name)
-    
 
-# np.save(file_with_signal+".npy", trimmed_signal)
-# print(f"Shape: {trimmed_signal.shape}, Type: {trimmed_signal.dtype}")
+    commands = ["start", "finish", "go", "stop"]
+    for word in commands:
+        path = f"Data/Raw/{word}/"
+        output_path = f"Data/Processed/{word}/"
 
-# display_graphs(time, samples_with_time[:,0], filtered_signal, hamming_signal, trimmed_signal, [start_index_trimmed_sampled, finish_index_trimmed_sampled])
+        if not os.path.exists(output_path):
+               os.makedirs(output_path)
 
-# with wave.open("output.wav", mode="wb") as wav_file:
-#     wav_file.setnchannels(nchannels)
-#     wav_file.setsampwidth(sampwidth)
-#     wav_file.setframerate(framerate)
-#     wav_file.writeframes(trimmed_signal.tobytes())
+        for i in tqdm(range(0,10,1), desc=f"Processing {word}"): 
+            name = f"{word}-{i+1:02d}"
+            # print(f"{i+1}")
+            do_preemphasis(path+name, output_path+name, display_graphs_allow=False, save_to_file=True)
+            # print(f"\n")
+
 
 
 
