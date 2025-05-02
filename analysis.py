@@ -36,7 +36,7 @@ def displaying_lpc(original_signal: np.ndarray, coeff: np.ndarray, show_graphs=F
         plt.show()
 
 
-# INFO: Calculating LPC
+# INFO: Calculating LPC of a signal
 # NOTE: Librosa takes in 1 x N
 # Output: lpc_coeff array
 def get_lpc_and_auto_coefficients(signal: np.ndarray, framerate=16000, print_rsme=True, show_graphs=False):
@@ -45,8 +45,10 @@ def get_lpc_and_auto_coefficients(signal: np.ndarray, framerate=16000, print_rsm
     samples_per_10ms = int(0.01 * framerate)
     num_frames_in_signal = int((nframes-samples_per_20ms)/samples_per_10ms) + 1
 
+    # NOTE: The last element of the auto_coeff is zero. This is to be able to save the 
+    # 13 values of the lpc (counting 1).
     order = 12
-    coefficients = np.zeros((num_frames_in_signal,2,order), dtype=np.float64) 
+    coefficients = np.zeros((num_frames_in_signal,2,order+1), dtype=np.float64) 
 
     # print(f"Num frames in signal: {num_frames_in_signal}")
     for i in range(num_frames_in_signal):
@@ -59,7 +61,7 @@ def get_lpc_and_auto_coefficients(signal: np.ndarray, framerate=16000, print_rsm
             frame_to_evalute = signal[start:finish]
 
         # NOTE: Order 12 gives a (13,) array
-        lpc_coeff = librosa.lpc(frame_to_evalute, order=order-1) 
+        lpc_coeff = librosa.lpc(frame_to_evalute, order=order) 
         # print(f"Shape coeff: {lpc_coeff.shape}")
         # print(f"LPC: {lpc_coeff}")
 
@@ -69,8 +71,8 @@ def get_lpc_and_auto_coefficients(signal: np.ndarray, framerate=16000, print_rsm
         # print(f"Auto coeff shape: {auto_coeff.shape}")
         # print(f"Auto coeff: {auto_coeff}")
 
-        coefficients[i][0] = np.copy(lpc_coeff);
-        coefficients[i][1] = np.copy(auto_coeff);
+        coefficients[i][0] = np.copy(lpc_coeff)
+        coefficients[i][1][:12] = np.copy(auto_coeff) # last element is zero
 
         if(print_rsme==True):
             displaying_lpc(frame_to_evalute, lpc_coeff, show_graphs=show_graphs)
@@ -79,33 +81,48 @@ def get_lpc_and_auto_coefficients(signal: np.ndarray, framerate=16000, print_rsm
 
 # INFO: Assuming that every comand has 10 
 # files for training
-def create_coefficients(commands: list):
-    for word in commands:
-        path = f"Data/Processed/{word}/"
-        output_path = f"Data/Coeff/{word}/"
+def create_coefficients(word: str):
+    path = f"Data/Processed/{word}/"
+    output_path = f"Data/Coeff/{word}/"
 
-        if not os.path.exists(output_path):
-               os.makedirs(output_path)
+    if not os.path.exists(output_path):
+           os.makedirs(output_path)
 
-        for i in tqdm(range(0,10,1), desc=f"Processing LPC and Auto for: {word}"): 
-            name = f"{word}-{i+1:02d}"
-            signal = np.load(path+name+".npy")
-            signal_squeeze = signal.squeeze()
-            # print(f"{i+1}")
-            output = get_lpc_and_auto_coefficients(signal_squeeze, print_rsme=False)
-            np.save(output_path+name+".npy", output)
-            # print(f"\n")
+    lpc_all = np.zeros((1,14))
+    auto_all = np.zeros((1,13))
+    for i in tqdm(range(0,10,1), desc=f"Processing LPC and Auto for: {word}"): 
+        name = f"{word}-{i+1:02d}"
+        signal = np.load(path+name+".npy")
+        signal_squeeze = signal.squeeze()
+        # print(f"{i+1}")
+        output = get_lpc_and_auto_coefficients(signal_squeeze, print_rsme=False)
+        for i in range(output.shape[0]):
+            temp_lpc = output[i][0]
+            temp_auto = output[i][1].reshape(1,-1)
+            temp_lpc = np.insert(temp_lpc, 0, 0).reshape(1,-1) # insert space to identify centroid
+            lpc_all = np.append(lpc_all, temp_lpc, axis=0)
+            auto_all = np.append(auto_all, temp_auto, axis=0)
+
+    np.save(output_path+word+"_lpc.npy", lpc_all[1:,:])
+    np.save(output_path+word+"_auto.npy", auto_all[1:,:])
+
 
 # INFO: Assumes that each file contains the lpc and auto coeff
-# of that word. We must read every file. One file will mean only
-# one training word
-def create_code_vector(commands: list):
+# of each frame of that word. We must read every file. 
+# One file will mean only one training word.
+def create_code_vector(word: str):
+    path = f"Data/Coeff/{word}/"
+    
 
 
 if __name__ == "__main__":
-    commands = ["start", "finish", "go", "stop"]
-    create_coefficients(commands)
+    # commands = ["start", "finish", "go", "stop"]
     # commands = ["start"]
+    # for word in commands:
+    #     create_coefficients(word)
+
+    commands = ["start"]
+    create_code_vector(commands[0])
 
 
 
