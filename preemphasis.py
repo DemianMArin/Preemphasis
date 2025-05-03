@@ -263,7 +263,7 @@ if __name__ == "__main__":
         if not os.path.exists(output_path):
                os.makedirs(output_path)
 
-        for i in tqdm(range(0,10,1), desc=f"Processing {word}"): 
+        for i in tqdm(range(10,15,1), desc=f"Processing {word}"): 
             name = f"{word}-{i+1:02d}"
             # print(f"{i+1}")
             do_preemphasis(path+name, output_path+name, display_graphs_allow=False, save_to_file=True)

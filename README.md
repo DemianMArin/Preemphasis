@@ -15,4 +15,10 @@ _Raw_ contains my original recording: PCM signed 16 integer, mono, 16000 framera
     │   ├── Processed
     │   └── Raw
 
+## Results
+Here are is the confusion matrix with a 10 samples per word (start, stop, finish, go) with 5 test words. The codebook created has 16 vectors of lpc coeffiicents of dimension 12
+and the testing was done with autocorrelation coefficients with dimension 12. 
+
+![Confusion Matrix](Images/confusion_matrix.png)
+
 

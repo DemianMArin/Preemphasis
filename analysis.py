@@ -88,9 +88,12 @@ def create_coefficients(word: str):
     if not os.path.exists(output_path):
            os.makedirs(output_path)
 
+    start = 0
+    finish = 10
+
     lpc_all = np.zeros((1,14))
     auto_all = np.zeros((1,13))
-    for i in tqdm(range(0,10,1), desc=f"Processing LPC and Auto for: {word}"): 
+    for i in tqdm(range(start,finish,1), desc=f"Processing LPC and Auto for: {word}"): 
         name = f"{word}-{i+1:02d}"
         signal = np.load(path+name+".npy")
         signal_squeeze = signal.squeeze()
@@ -105,6 +108,31 @@ def create_coefficients(word: str):
 
     np.save(output_path+word+"_lpc.npy", lpc_all[1:,:]) # Remove the first array with 0
     np.save(output_path+word+"_auto.npy", auto_all[1:,:])
+
+# INFO: Assuming that every comand has 10 
+# files for training
+def create_coefficients_test(word: str):
+    path = f"Data/Processed/{word}/"
+    output_path = f"Data/Coeff/{word}/"
+
+    if not os.path.exists(output_path):
+           os.makedirs(output_path)
+
+    start = 10
+    finish = 15
+
+    lpc_all = np.zeros((1,14))
+    auto_all = np.zeros((1,13))
+    for i in tqdm(range(start,finish,1), desc=f"Processing Auto for: {word}"): 
+        name = f"{word}-{i+1:02d}"
+        signal = np.load(path+name+".npy")
+        signal_squeeze = signal.squeeze()
+        # print(f"{i+1}")
+        output = get_lpc_and_auto_coefficients(signal_squeeze, print_rsme=False)
+        for i in range(output.shape[0]):
+            temp_auto = output[i][1].reshape(1,-1)
+            auto_all = np.append(auto_all, temp_auto, axis=0)
+        np.save(output_path+name+"_test_auto.npy", auto_all[1:,:])
 
 
 def print_array(array: np.ndarray):
@@ -136,13 +164,13 @@ def itakura_saito_distance(auto_coeff_raw: np.ndarray, auto_coeff_centroid: np.n
 # the number of centroids is max id in the first column
 # of all rows
 # Input
-# `lpc_coeff` Shape: [order lpc = 12+1, num_centroids]
+# `lpc_coeff` Shape: [num lpc frames, lpc order =12]
 # Output
 # `centroids_lsf` Shape: [dim=12, num_centroids]
 def calculate_lsf_centroids(lpc_coeff: np.ndarray) -> np.ndarray:
     num_lpc = lpc_coeff.shape[0]
     dim = lpc_coeff.shape[1]-2 # remove 1 for id and another for dim reduction when poly2lsf 
-    num_centroids = int(lpc_coeff[:,0].max())+1
+    num_centroids = int(lpc_coeff[:,0].max())+1 # if max is 0, +1 so array not empty
     
     centroids_lsf = np.zeros((dim,num_centroids))
     centroids_lsf_count = np.zeros((1,num_centroids))
@@ -154,7 +182,10 @@ def calculate_lsf_centroids(lpc_coeff: np.ndarray) -> np.ndarray:
         centroids_lsf_count[0,id] += 1
 
     for i in range(num_centroids):
+        # print(f"lsf count {i}: {centroids_lsf_count[0,i]}")
+        if(centroids_lsf_count[0,i] == 0): centroids_lsf_count[0,i]+=1
         centroids_lsf[:,i] = np.divide(centroids_lsf[:,i], centroids_lsf_count[0,i])
+        # print(f"lsf centroids {i}: {centroids_lsf[:,i]}")
 
     return centroids_lsf
 
@@ -193,14 +224,45 @@ def calculate_distances(auto_coeff_frames: np.ndarray, centroids_lsf: np.ndarray
             id_centroid[i] = min_index_distance
         
         global_distance += distances[min_index_distance,0]
-        
+
+    # print(f"id {id_centroid}")
+
     output = {
         "global_distance": global_distance,
         "id_centroid": id_centroid
     }
     return output
 
-# def new_epsilon_centroids(centroids_lsf: np.ndarray):
+# INFO: Creates 2 times current centroids with epsilon
+# Input
+# `centroids_lsf` : [order of lpc=12, num centroids]
+def new_epsilon_centroids(centroids_lsf: np.ndarray, epsilon1: float, epsilon2: float):
+
+    dim_centroids_lsf = centroids_lsf.shape[0]
+    curr_num_centroids = centroids_lsf.shape[1]
+    new_num_centroids = 2*curr_num_centroids
+
+    n = int(math.log2(curr_num_centroids))
+    ispowerof2 =  2**n == curr_num_centroids 
+    if (not ispowerof2):
+        print(f"Centroids must be power of 2")
+        return -1
+
+
+    epsilon = [epsilon1, epsilon2]
+    new_centroids_lsf = np.zeros((dim_centroids_lsf, new_num_centroids))
+    lsf_selector = 0
+    lsf_centroid_used = 1
+    for i in range(new_num_centroids):
+        epsilon_selector = i % 2
+        new_centroids_lsf[:,i] = centroids_lsf[:,lsf_selector] * epsilon[epsilon_selector]
+        if lsf_centroid_used == 2:
+            lsf_selector += 1
+            lsf_centroid_used = 0
+        lsf_centroid_used += 1
+
+    return new_centroids_lsf
+        
 
     
 # INFO: Assumes that each file contains the lpc and auto coeff
@@ -240,34 +302,80 @@ def create_code_vector(word: str, centroids=16, epsilon1=1.001, epsilon2=0.999, 
     global_distance = 0
     prev_global_distance = 0
     diff_global_distance = global_distance_threshold+1 
-    top1 = 2
-    for j in range(12):
-    # j = 0
-    # while(diff_global_distance>global_distance_threshold):
-        print(f"\nIter: {j}")
-        id_centroid = lpc_coeff[:,0]
-        output = calculate_distances(auto_coeff, centroids_lsf, id_centroid)
-        global_distance = output["global_distance"]
-        id_centroid = output["id_centroid"]
+    max_iter = 20
+    for i in range(iterations-1):
+    # for i in range(3):
+        j = 0
+        while(diff_global_distance>global_distance_threshold):
+            # print(f"\ncentroids: {i}, iter: {j}")
+            id_centroid = lpc_coeff[:,0]
+            output = calculate_distances(auto_coeff, centroids_lsf, id_centroid)
+            global_distance = output["global_distance"]
+            id_centroid = output["id_centroid"]
 
-        lpc_coeff[:,0] = id_centroid
+            lpc_coeff[:,0] = id_centroid
 
-        diff_global_distance = math.fabs(global_distance - prev_global_distance)
-        prev_global_distance = global_distance
-        print(f"GD: {global_distance:,}")
-        print(f"Diff: {diff_global_distance:,}")
+            diff_global_distance = math.fabs(global_distance - prev_global_distance)
+            prev_global_distance = global_distance
+            # print(f"GD: {global_distance:,}")
+            # print(f"Diff: {diff_global_distance:,}")
 
-        centroids_lsf = calculate_lsf_centroids(lpc_coeff)
-        j+=1
+            centroids_lsf = calculate_lsf_centroids(lpc_coeff)
+            j+=1
+            if (j>max_iter): 
+                print(f"Diff: {diff_global_distance:,}")
+                diff_global_distance = global_distance_threshold + 10
+                print(f"{max_iter} iter reached")
+                break
+
+        global_distance = 0 
+        diff_global_distance = global_distance_threshold + 1
+        # print(f"Convergence number: {i}")
+        # print(f"Before new epsilon centroids shape: {centroids_lsf.shape}")
+        # print(f"{centroids_lsf}")
+        centroids_lsf = new_epsilon_centroids(centroids_lsf, epsilon1, epsilon2)
+        # print(f"After new epsilon centroids shape: {centroids_lsf.shape}")
+        # print(f"{centroids_lsf}")
+
+
+    final_centroids_lpc = np.zeros((centroids_lsf.shape[0]+1,centroids_lsf.shape[1])) # convert back to lpc
+    for i in range(centroids_lsf.shape[1]):
+        final_centroids_lpc[:,i] = np.array(spectrum.lsf2poly(centroids_lsf[:,i]))
+
+    final_centroids_auto = np.zeros((centroids_lsf.shape[0], centroids_lsf.shape[1])) # Get auto coeff 
+    order = centroids_lsf.shape[0]
+    for i in range(centroids_lsf.shape[1]):
+        final_centroids_auto[:,i] = librosa.autocorrelate(final_centroids_lpc[:,i], max_size=order) 
+
+    print(f"Final Centroids LPC shape {word}: {final_centroids_lpc.shape}")
+    print(f"Final Centroids Auto coeff LPC shape {word}: {final_centroids_auto.shape}")
+
+    # print(f"{final_centroids_lpc}")
+
+    output_path = f"Data/CodeVector/{word}/"
+    if not os.path.exists(output_path):
+           os.makedirs(output_path)
+
+    np.save(output_path+word+"_lpc_code_vector.npy", final_centroids_lpc)
+    np.save(output_path+word+"_auto_coeff_lpc_code_vector.npy", final_centroids_auto)
 
 
 if __name__ == "__main__":
+    # Training
     # commands = ["start", "finish", "go", "stop"]
     # for word in commands:
     #     create_coefficients(word)
 
-    commands = ["start"]
-    create_code_vector(commands[0])
+    # Test
+    commands = ["start", "finish", "go", "stop"]
+    for word in commands:
+        create_coefficients_test(word)
+
+
+    # Create code vector
+    # commands = ["start", "finish", "go", "stop"]
+    # for word in tqdm(commands):
+    #     create_code_vector(word)
 
     # Testing calculate_lsf_centroids
     # word = commands[0]
